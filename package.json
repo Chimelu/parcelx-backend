@@ -29,5 +29,8 @@
   },
   "engines": {
     "node": ">=14.0.0"
+  },
+  "overrides": {
+    "debug": "2.6.9"
   }
 }

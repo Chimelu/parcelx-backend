@@ -1,5 +1,6 @@
 const express = require('express');
 const Order = require('../models/Order');
+const emailService = require('../services/emailService');
 
 const router = express.Router();
 
@@ -133,9 +134,30 @@ router.post('/', async (req, res) => {
 
     await order.save();
 
+    // Send order confirmation email to customer
+    try {
+      const emailResult = await emailService.sendOrderConfirmation({
+        customerEmail: customer.email,
+        trackingId: order.trackingId,
+        status: 'Order Created',
+        items: [`Package from ${shipping.from} to ${shipping.to}`]
+      });
+
+      console.log(`📧 Order confirmation email sent to ${customer.email}:`, emailResult.success ? 'Success' : 'Failed');
+      
+      // Add email status to response
+      if (!emailResult.success) {
+        console.warn(`⚠️ Email failed for order ${order.trackingId}:`, emailResult.message);
+      }
+    } catch (emailError) {
+      console.error(`❌ Email error for order ${order.trackingId}:`, emailError.message);
+      // Don't fail the order creation if email fails
+    }
+
     res.status(201).json({
       message: 'Order created successfully',
-      order
+      order,
+      emailSent: true
     });
   } catch (error) {
     console.error('Create order error:', error);
@@ -171,6 +193,9 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    // Store previous timeline to detect status changes
+    const previousTimeline = order.timeline;
+    
     // Update fields if provided
     if (customer) order.customer = { ...order.customer, ...customer };
     if (shipping) order.shipping = { ...order.shipping, ...shipping };
@@ -180,9 +205,38 @@ router.put('/:id', async (req, res) => {
     order.updatedAt = new Date();
     await order.save();
 
+    // Check if timeline was updated and send status update email
+    if (timeline && timeline.length > 0) {
+      const latestStatus = timeline[timeline.length - 1];
+      const hasNewStatus = previousTimeline.length !== timeline.length || 
+                          previousTimeline[previousTimeline.length - 1]?.status !== latestStatus.status;
+
+      if (hasNewStatus && latestStatus.status) {
+        try {
+          const emailResult = await emailService.sendStatusUpdate({
+            customerEmail: order.customer.email,
+            trackingId: order.trackingId,
+            status: latestStatus.status,
+            location: latestStatus.location || order.shipping.to,
+            timestamp: latestStatus.date || new Date().toISOString()
+          });
+
+          console.log(`📧 Status update email sent to ${order.customer.email}:`, emailResult.success ? 'Success' : 'Failed');
+          
+          if (!emailResult.success) {
+            console.warn(`⚠️ Status update email failed for order ${order.trackingId}:`, emailResult.message);
+          }
+        } catch (emailError) {
+          console.error(`❌ Status update email error for order ${order.trackingId}:`, emailError.message);
+          // Don't fail the order update if email fails
+        }
+      }
+    }
+
     res.json({
       message: 'Order updated successfully',
-      order
+      order,
+      statusUpdateEmailSent: timeline ? true : false
     });
   } catch (error) {
     console.error('Update order error:', error);

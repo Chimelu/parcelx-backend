@@ -3,8 +3,10 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
-const fetch = require('node-fetch');
+const https = require('https');
+const http = require('http');
 const orderRoutes = require('./routes/orders');
+const emailRoutes = require('./routes/emails');
 
 // Load environment variables
 dotenv.config();
@@ -18,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/orders', orderRoutes);
+app.use('/api/emails', emailRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -42,17 +45,17 @@ app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+// Connect to MongoDB (optional for email service)
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/parcelx', {
+  // useNewUrlParser: true,
+  // useUnifiedTopology: true,
 })
 .then(() => {
-  console.log('Connected to MongoDB');
+  console.log('✅ Connected to MongoDB');   
 })
 .catch((error) => {
-  console.error('MongoDB connection error:', error);
-  process.exit(1);
+  console.warn('⚠️ MongoDB connection failed - Email service will still work:', error.message);
+  console.log('💡 To fix: Start MongoDB or use MongoDB Atlas cloud database');
 });
 
 const PORT = process.env.PORT || 5000;
@@ -68,17 +71,33 @@ app.listen(PORT, () => {
     console.log(`[CRON] Pinging server to keep it awake: ${serverUrl}/api/health`);
     
     // Self-ping to keep the server active
-    fetch(`${serverUrl}/api/health`)
-      .then(response => {
-        if (response.ok) {
-          console.log(`[CRON] Server ping successful - Status: ${response.status}`);
-        } else {
-          console.log(`[CRON] Server ping failed - Status: ${response.status}`);
-        }
-      })
-      .catch(error => {
-        console.error(`[CRON] Server ping error:`, error.message);
-      });
+    const url = new URL(`${serverUrl}/api/health`);
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname,
+      method: 'GET',
+      timeout: 5000
+    };
+
+    const request = (url.protocol === 'https:' ? https : http).request(options, (response) => {
+      if (response.statusCode === 200) {
+        console.log(`[CRON] Server ping successful - Status: ${response.statusCode}`);
+      } else {
+        console.log(`[CRON] Server ping failed - Status: ${response.statusCode}`);
+      }
+    });
+
+    request.on('error', (error) => {
+      console.error(`[CRON] Server ping error:`, error.message);
+    });
+
+    request.on('timeout', () => {
+      console.error(`[CRON] Server ping timeout`);
+      request.destroy();
+    });
+
+    request.end();
   }, {
     scheduled: true,
     timezone: "UTC"

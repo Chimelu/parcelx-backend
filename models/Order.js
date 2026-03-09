@@ -50,8 +50,7 @@ const orderSchema = new mongoose.Schema({
     type: {
       type: String,
       required: true,
-      enum: ['Electronics', 'Clothing', 'Documents', 'Fragile', 'Other'],
-      default: 'Other'
+      trim: true
     },
     weight: {
       type: String,
@@ -65,14 +64,33 @@ const orderSchema = new mongoose.Schema({
     },
     value: {
       type: String,
-      required: true,
       trim: true
     },
     specialInstructions: {
       type: String,
       trim: true,
       default: ''
+    },
+    imageUrl: {
+      type: String,
+      trim: true
+    },
+    location: {
+      lat: {
+        type: Number
+      },
+      lng: {
+        type: Number
+      },
+      name: {
+        type: String,
+        trim: true
+      }
     }
+  },
+  isExternal: {
+    type: Boolean,
+    default: false
   },
   timeline: [{
     status: {

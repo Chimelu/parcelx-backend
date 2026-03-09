@@ -8,7 +8,7 @@ class EmailService {
   constructor() {
     // Zoho SMTP configuration
     this.transporter = nodemailer.createTransport({
-      host: 'smtppro.zoho.com',
+      host: 'smtp.zoho.com',
       port: 465, // Use port 587 for TLS or 465 for SSL
       secure: true, // true for 465, false for other ports
       auth: {

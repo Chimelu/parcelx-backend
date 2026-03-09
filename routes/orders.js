@@ -2,13 +2,55 @@ const express = require('express');
 const Order = require('../models/Order');
 const emailService = require('../services/emailService');
 
-const router = express.Router();
+const router = express.Router();  
 
 // Get all orders
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 10, search } = req.query;
+    const { page = 1, limit = 10, search, isExternal } = req.query;
     const query = {};
+
+    // Search functionality
+    if (search) {
+      query.$or = [
+        { trackingId: { $regex: search, $options: 'i' } },
+        { 'customer.name': { $regex: search, $options: 'i' } },
+        { 'customer.email': { $regex: search, $options: 'i' } },
+        { 'shipping.from': { $regex: search, $options: 'i' } },
+        { 'shipping.to': { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Filter by external flag if provided
+    if (typeof isExternal !== 'undefined') {
+      query.isExternal = isExternal === 'true';
+    }
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .exec();
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      orders,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      total
+    });
+  } catch (error) {
+    console.error('Get orders error:', error);
+    res.status(500).json({ message: 'Server error while fetching orders' });
+  }
+});
+
+// Get external orders (convenience endpoint)
+router.get('/external', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search } = req.query;
+    const query = { isExternal: true };
 
     // Search functionality
     if (search) {
@@ -36,8 +78,8 @@ router.get('/', async (req, res) => {
       total
     });
   } catch (error) {
-    console.error('Get orders error:', error);
-    res.status(500).json({ message: 'Server error while fetching orders' });
+    console.error('Get external orders error:', error);
+    res.status(500).json({ message: 'Server error while fetching external orders' });
   }
 });
 
@@ -94,7 +136,8 @@ router.post('/', async (req, res) => {
       customer,
       shipping,
       package: packageInfo,
-      timeline = []
+      timeline = [],
+      isExternal
     } = req.body;
 
     // Validate required fields
@@ -110,9 +153,9 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (!packageInfo?.weight || !packageInfo?.dimensions || !packageInfo?.value) {
+    if (!packageInfo?.type || !packageInfo?.weight || !packageInfo?.dimensions) {
       return res.status(400).json({ 
-        message: 'Package information is required' 
+        message: 'Package information (type, weight, dimensions) is required' 
       });
     }
 
@@ -129,7 +172,8 @@ router.post('/', async (req, res) => {
       customer,
       shipping,
       package: packageInfo,
-      timeline: initialTimeline
+      timeline: initialTimeline,
+      isExternal: typeof isExternal === 'boolean' ? isExternal : !!isExternal
     });
 
     await order.save();

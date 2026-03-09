@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+require('dotenv').config();
 
 /**
  * Email Service for Zoho SMTP
@@ -6,20 +7,27 @@ const nodemailer = require('nodemailer');
  */
 class EmailService {   
   constructor() {
-    // Zoho SMTP configuration
+    // Primary Zoho SMTP configuration (internal)
     this.transporter = nodemailer.createTransport({
       host: 'smtp.zoho.com',
-      port: 465, // Use port 587 for TLS or 465 for SSL
-      secure: true, // true for 465, false for other ports
+      port: 465,
+      secure: true,
       auth: {
-        user: "admin@parcelx.org", // Your Zoho email address
-        pass: "Parcelx@1"    
-        //  Your Zoho app-specific password
-      },
-      // ZOHO_EMAIL=admin@parcelx.org
-// ZOHO_APP_PASSWORD=Parcelx@1
-    
-    });   
+        user: process.env.ZOHO_EMAIL,
+        pass: process.env.ZOHO_APP_PASSWORD
+      }
+    });
+
+    // External Zoho SMTP configuration (for external orders)
+    this.externalTransporter = nodemailer.createTransport({
+      host: 'smtp.zoho.com',
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.EXTERNAL_ZOHO_EMAIL,
+        pass: process.env.EXTERNAL_ZOHO_APP_PASSWORD
+      }
+    });
 
     // Verify connection configuration
     this.verifyConnection();
@@ -37,6 +45,16 @@ class EmailService {
       console.log(process.env.ZOHO_EMAIL, process.env.ZOHO_APP_PASSWORD);
       console.error('Please check your Zoho email credentials in environment variables');
     }
+
+    // Verify external transporter separately (do not fail hard if misconfigured)
+    try {
+      await this.externalTransporter.verify();
+      console.log('✅ External Zoho SMTP connection verified successfully');
+    } catch (error) {
+      console.error('❌ External Zoho SMTP connection failed:', error.message);
+      console.log(process.env.EXTERNAL_ZOHO_EMAIL, process.env.EXTERNAL_ZOHO_APP_PASSWORD);
+      console.error('Please check your EXTERNAL_ZOHO_* credentials in environment variables');
+    }   
   }
 
   /**
@@ -49,7 +67,7 @@ class EmailService {
    * @param {boolean} [emailData.isHtml] - Whether body is HTML (default: true)
    * @returns {Promise<Object>} - Result object with success status and message
    */
-  async sendEmail({ to, subject, body, from, isHtml = true }) {
+  async sendEmail({ to, subject, body, from, isHtml = true, useExternal = false }) {
     try {
       // Validate required fields
       if (!to || !subject || !body) {
@@ -62,16 +80,19 @@ class EmailService {
         throw new Error('Invalid recipient email format');
       }
 
+      // Choose transporter based on useExternal flag
+      const transporter = useExternal ? this.externalTransporter : this.transporter;
+
       // Email options
       const mailOptions = {
-        from: from || process.env.ZOHO_EMAIL, // Use environment variable as default sender
+        from: from || (useExternal ? process.env.EXTERNAL_ZOHO_EMAIL : process.env.ZOHO_EMAIL),
         to: to,
         subject: subject,
         [isHtml ? 'html' : 'text']: body
       };
 
       // Send email
-      const result = await this.transporter.sendMail(mailOptions);
+      const result = await transporter.sendMail(mailOptions);
       
       console.log(`📧 Email sent successfully to ${to}`);
       console.log(`📧 Message ID: ${result.messageId}`);
@@ -100,7 +121,7 @@ class EmailService {
    * @returns {Promise<Object>} - Result object
    */
   async sendOrderConfirmation(orderData) {
-    const { customerEmail, trackingId, status, items } = orderData;
+    const { customerEmail, trackingId, status, items, isExternal } = orderData;
     
     const subject = `ParcelX Order Confirmation - Tracking ID: ${trackingId}`;
     const htmlBody = `
@@ -134,7 +155,8 @@ class EmailService {
       to: customerEmail,
       subject: subject,
       body: htmlBody,
-      isHtml: true
+      isHtml: true,
+      useExternal: !!isExternal
     });
   }
 

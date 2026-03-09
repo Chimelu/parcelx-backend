@@ -184,7 +184,8 @@ router.post('/', async (req, res) => {
         customerEmail: customer.email,
         trackingId: order.trackingId,
         status: 'Order Created',
-        items: [`Package from ${shipping.from} to ${shipping.to}`]
+        items: [`Package from ${shipping.from} to ${shipping.to}`],
+        isExternal: !!order.isExternal
       });
 
       console.log(`📧 Order confirmation email sent to ${customer.email}:`, emailResult.success ? 'Success' : 'Failed');

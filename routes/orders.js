@@ -1,8 +1,18 @@
 const express = require('express');
+const multer = require('multer');
 const Order = require('../models/Order');
 const emailService = require('../services/emailService');
+const { uploadImage } = require('../services/cloudinaryService');
 
 const router = express.Router();  
+
+// Multer setup for handling image uploads in memory
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB
+  }
+});
 
 // Get all orders
 router.get('/', async (req, res) => {
@@ -130,15 +140,26 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new order
-router.post('/', async (req, res) => {
+router.post('/', upload.single('image'), async (req, res) => {
   try {
-    const {
+    let {
       customer,
       shipping,
       package: packageInfo,
       timeline = [],
       isExternal
     } = req.body;
+
+    // If data comes as JSON strings (common with multipart/form-data), parse them
+    try {
+      if (typeof customer === 'string') customer = JSON.parse(customer);
+      if (typeof shipping === 'string') shipping = JSON.parse(shipping);
+      if (typeof packageInfo === 'string') packageInfo = JSON.parse(packageInfo);
+      if (typeof timeline === 'string') timeline = JSON.parse(timeline);
+    } catch (parseError) {
+      console.error('Error parsing JSON fields from form-data:', parseError.message);
+      return res.status(400).json({ message: 'Invalid JSON in form-data fields' });
+    }
 
     // Validate required fields
     if (!customer?.name || !customer?.email || !customer?.phone || !customer?.address) {
@@ -157,6 +178,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ 
         message: 'Package information (type, weight, dimensions) is required' 
       });
+    }
+
+    // If a file is provided via form-data, upload to Cloudinary
+    if (req.file && !packageInfo.imageUrl) {
+      try {
+        const uploadResult = await uploadImage(req.file.buffer);
+        packageInfo.imageUrl = uploadResult.secure_url;
+      } catch (uploadError) {
+        console.error('Cloudinary upload error:', uploadError.message);
+        return res.status(500).json({ message: 'Error uploading package image' });
+      }
     }
 
     // Create initial timeline if not provided

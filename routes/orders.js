@@ -247,14 +247,25 @@ router.post('/', upload.single('image'), async (req, res) => {
 });
 
 // Update order (trackingId or MongoDB ObjectId)
-router.put('/:id', async (req, res) => {
+router.put('/:id', upload.single('image'), async (req, res) => {
   try {
-    const {
+    let {
       customer,
       shipping,
       package: packageInfo,
       timeline
     } = req.body;
+
+    // If data comes as JSON strings (common with multipart/form-data), parse them
+    try {
+      if (typeof customer === 'string') customer = JSON.parse(customer);
+      if (typeof shipping === 'string') shipping = JSON.parse(shipping);
+      if (typeof packageInfo === 'string') packageInfo = JSON.parse(packageInfo);
+      if (typeof timeline === 'string') timeline = JSON.parse(timeline);
+    } catch (parseError) {
+      console.error('Error parsing JSON fields from form-data (update):', parseError.message);
+      return res.status(400).json({ message: 'Invalid JSON in form-data fields' });
+    }
 
     let order;
     
@@ -268,6 +279,17 @@ router.put('/:id', async (req, res) => {
 
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // If a new file is provided via form-data, upload to Cloudinary
+    if (req.file && packageInfo) {
+      try {
+        const uploadResult = await uploadImage(req.file.buffer);
+        packageInfo.imageUrl = uploadResult.secure_url;
+      } catch (uploadError) {
+        console.error('Cloudinary upload error (update):', uploadError.message);
+        return res.status(500).json({ message: 'Error uploading package image' });
+      }
     }
 
     // Store previous timeline to detect status changes
